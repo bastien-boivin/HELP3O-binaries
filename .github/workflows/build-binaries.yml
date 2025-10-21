@@ -72,23 +72,103 @@ jobs:
         run: |
           python build_extensions.py
 
-      # Verify macOS binary is statically linked (no external GCC dependencies)
-      - name: Verify macOS binary dependencies
+      # Bundle GCC libraries with macOS binary (self-contained approach)
+      - name: Bundle GCC libraries with macOS binary
         if: runner.os == 'macOS'
         run: |
           BINARY=$(ls HELP3O.*.so 2>/dev/null | head -n1)
-          if [ -n "$BINARY" ]; then
-            echo "=== Binary: $BINARY ==="
-            echo "=== Dependencies ==="
-            otool -L "$BINARY"
-            echo ""
-            echo "=== Checking for GCC runtime dependencies ==="
-            if otool -L "$BINARY" | grep -E 'libgfortran|libquadmath|libgcc_s'; then
-              echo "WARNING: Binary has dynamic GCC dependencies (static linking may have failed)"
-            else
-              echo "✓ Binary is properly statically linked (no GCC runtime dependencies)"
-            fi
+          if [ -z "$BINARY" ]; then
+            echo "ERROR: No binary found"
+            exit 1
           fi
+
+          echo "=== Binary: $BINARY ==="
+          echo "=== Original dependencies ==="
+          otool -L "$BINARY"
+
+          # Create libs directory
+          mkdir -p gcc_libs
+
+          # Find GCC installation
+          GCC_PREFIX="$(brew --prefix gcc)"
+          GCC_LIB_DIR="$GCC_PREFIX/lib/gcc/current"
+
+          echo ""
+          echo "=== Bundling GCC libraries ==="
+
+          # Copy all GCC runtime libraries
+          for lib in libgfortran.5.dylib libquadmath.0.dylib libgcc_s.1.1.dylib libgcc_s.1.dylib; do
+            if [ -f "$GCC_LIB_DIR/$lib" ]; then
+              echo "Copying $lib..."
+              cp "$GCC_LIB_DIR/$lib" gcc_libs/
+            elif [ -f "$GCC_PREFIX/lib/$lib" ]; then
+              echo "Copying $lib from $GCC_PREFIX/lib..."
+              cp "$GCC_PREFIX/lib/$lib" gcc_libs/
+            fi
+          done
+
+          # List bundled libraries
+          echo ""
+          echo "=== Bundled libraries ==="
+          ls -lh gcc_libs/
+
+          # Move libraries to same directory as binary (simpler for hydromodpy to handle)
+          echo ""
+          echo "=== Moving libraries to binary directory ==="
+          mv gcc_libs/*.dylib .
+          rmdir gcc_libs
+
+          # Modify binary to use @loader_path (libraries in same directory as .so)
+          echo ""
+          echo "=== Modifying binary to use @loader_path ==="
+
+          for lib in *.dylib; do
+            libname=$(basename "$lib")
+            echo "Processing $libname..."
+
+            # Get current path from binary
+            current_path=$(otool -L "$BINARY" | grep "$libname" | awk '{print $1}')
+
+            if [ -n "$current_path" ]; then
+              echo "  Changing: $current_path"
+              echo "       to: @loader_path/$libname"
+              install_name_tool -change "$current_path" "@loader_path/$libname" "$BINARY"
+            fi
+          done
+
+          # Also fix inter-library dependencies
+          echo ""
+          echo "=== Fixing inter-library dependencies ==="
+          for lib in *.dylib; do
+            libname=$(basename "$lib")
+            echo "Processing $libname..."
+
+            # Change ID to @loader_path
+            install_name_tool -id "@loader_path/$libname" "$lib"
+
+            # Fix dependencies within the library
+            otool -L "$lib" | grep -E 'libgfortran|libquadmath|libgcc_s' | awk '{print $1}' | while read dep; do
+              depname=$(basename "$dep")
+              if [ -f "$depname" ] && [ "$dep" != "@loader_path/$depname" ]; then
+                echo "  Fixing dependency: $depname"
+                install_name_tool -change "$dep" "@loader_path/$depname" "$lib"
+              fi
+            done
+          done
+
+          echo ""
+          echo "=== Final binary dependencies ==="
+          otool -L "$BINARY"
+
+          echo ""
+          echo "=== Final library dependencies ==="
+          for lib in *.dylib; do
+            echo "--- $(basename $lib) ---"
+            otool -L "$lib"
+          done
+
+          echo ""
+          echo "✓ GCC libraries bundled successfully"
 
       # Rename the binary with a platform-specific suffix
       - name: Rename binary (Linux/macOS)
@@ -147,7 +227,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: binary-${{ matrix.os }}-py${{ matrix.python }}
-          path: HELP3O.*.so
+          path: |
+            HELP3O.*.so
+            *.dylib
           if-no-files-found: error
       
       - name: Upload binary artifact (Windows)
