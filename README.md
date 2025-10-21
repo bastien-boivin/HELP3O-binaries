@@ -4,7 +4,7 @@ Pre-built HELP3O Fortran extension binaries maintained for the HydroModPy ecosys
 
 ## Purpose
 
-This repository automates the compilation of the original `HELP3O.FOR` source so HydroModPy—and any downstream tools that rely on HELP3O—can download a matching binary without compiling locally. Each workflow run creates a dated GitHub Release (for example `v2025.10`) that bundles all supported platform builds.
+This repository automates the compilation of the original `HELP3O.FOR` source so HydroModPy and other tools that rely on HELP3O can download a matching binary without compiling locally. Each workflow run creates a dated GitHub Release (for example `v2025.10`) that bundles all supported platform builds.
 
 ## Supported Platforms
 
@@ -62,7 +62,7 @@ Issues and pull requests that improve portability, add platforms, or enhance the
 
 ## License
 
-Distributes the HELP3O binaries under the same license as the original PyHELP project. Refer to `LICENSE` for details.
+Distributed under the MIT License. See [`LICENSE`](LICENSE) for the full text. Original HELP3O Fortran sources remain under the PyHELP project’s licensing terms.
 
 ## Credits
 
