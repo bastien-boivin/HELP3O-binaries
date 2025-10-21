@@ -170,16 +170,17 @@ jobs:
           echo ""
           echo "✓ GCC libraries bundled successfully"
 
-      # Rename the binary with a platform-specific suffix
-      - name: Rename binary (Linux/macOS)
-        if: runner.os != 'Windows'
+      # Package macOS binaries with bundled libraries into a tarball
+      - name: Package macOS binary with libraries
+        if: runner.os == 'macOS'
         run: |
           python << 'EOF'
           import sys
           import glob
           from pathlib import Path
           import os
-          
+          import tarfile
+
           binaries = glob.glob("HELP3O.*.so")
           if not binaries:
               print("ERROR: No binary found")
@@ -194,26 +195,59 @@ jobs:
           base = parts[0]
           python_tag = parts[1]
           suffix = src.suffix
-          runner_os = os.environ.get("RUNNER_OS", "").lower()
           runner_arch = os.environ.get("RUNNER_ARCH", "").lower()
           arch_map = {"x64": "x86_64", "arm64": "arm64"}
           arch = arch_map.get(runner_arch, runner_arch or "unknown")
 
-          dest = src
+          # Rename binary with normalized tag
           if "darwin" in python_tag:
               normalized_tag = python_tag.replace("darwin", f"macosx_{arch}")
-              dest = Path(f"{base}.{normalized_tag}{suffix}")
-          elif "linux" not in python_tag:
-              platform_tag = f"{runner_os}_{arch}"
-              dest = Path(f"{base}.{python_tag}-{platform_tag}{suffix}")
-
-          if dest != src:
-              if dest.exists():
-                  dest.unlink()
-              src.rename(dest)
-              print(f"Renamed {src} -> {dest}")
+              binary_name = f"{base}.{normalized_tag}{suffix}"
           else:
-              print(f"Keeping existing filename: {src}")
+              binary_name = src.name
+
+          if binary_name != src.name:
+              if Path(binary_name).exists():
+                  Path(binary_name).unlink()
+              src.rename(binary_name)
+              print(f"Renamed {src.name} -> {binary_name}")
+
+          # Create tarball with binary + dylibs
+          dylibs = glob.glob("*.dylib")
+          tarball_name = binary_name.replace('.so', '_bundle.tar.gz')
+
+          print(f"\nCreating bundle: {tarball_name}")
+          print(f"  Binary: {binary_name}")
+          print(f"  Libraries: {', '.join([Path(d).name for d in dylibs])}")
+
+          with tarfile.open(tarball_name, 'w:gz') as tar:
+              tar.add(binary_name, arcname=Path(binary_name).name)
+              for dylib in dylibs:
+                  tar.add(dylib, arcname=Path(dylib).name)
+
+          print(f"\n✓ Bundle created: {tarball_name}")
+
+          # Also keep the standalone binary for backward compatibility
+          print(f"✓ Standalone binary: {binary_name}")
+          EOF
+
+      # Rename binary for Linux (no bundling needed)
+      - name: Rename binary (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          python << 'EOF'
+          import sys
+          import glob
+          from pathlib import Path
+
+          binaries = glob.glob("HELP3O.*.so")
+          if not binaries:
+              print("ERROR: No binary found")
+              sys.exit(1)
+
+          src = Path(binaries[0])
+          # Linux binaries usually already have correct names from f2py
+          print(f"Linux binary: {src.name}")
           EOF
       
       - name: Rename binary (Windows)
@@ -222,14 +256,22 @@ jobs:
           python -c "import glob; print(glob.glob('HELP3O.*.pyd'))"
       
       # Upload compiled artifacts
-      - name: Upload binary artifact (Linux/macOS)
-        if: runner.os != 'Windows'
+      - name: Upload binary artifact (macOS)
+        if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
           name: binary-${{ matrix.os }}-py${{ matrix.python }}
           path: |
+            HELP3O.*_bundle.tar.gz
             HELP3O.*.so
-            *.dylib
+          if-no-files-found: error
+
+      - name: Upload binary artifact (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.os }}-py${{ matrix.python }}
+          path: HELP3O.*.so
           if-no-files-found: error
       
       - name: Upload binary artifact (Windows)
