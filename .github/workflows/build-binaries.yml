@@ -35,12 +35,31 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew install gcc
+          GCC_PREFIX="$(brew --prefix gcc)"
+          GFORTRAN_BIN="$(ls "$GCC_PREFIX/bin" | grep -E '^gfortran-[0-9]+$' | head -n 1)"
+          if [ -z "$GFORTRAN_BIN" ]; then
+            echo "No gfortran executable found in $GCC_PREFIX/bin" >&2
+            exit 1
+          fi
+          echo "$GCC_PREFIX/bin" >> "$GITHUB_PATH"
+          echo "FC=$GCC_PREFIX/bin/$GFORTRAN_BIN" >> "$GITHUB_ENV"
+          echo "F77=$GCC_PREFIX/bin/$GFORTRAN_BIN" >> "$GITHUB_ENV"
+          echo "Using gfortran binary: $GCC_PREFIX/bin/$GFORTRAN_BIN"
       
       # Windows: installer MinGW
       - name: Install MinGW (Windows)
         if: runner.os == 'Windows'
         run: |
           choco install mingw -y
+          $mingwPath = 'C:\tools\mingw64\bin'
+          if (!(Test-Path "$mingwPath\gfortran.exe")) {
+            Get-ChildItem -Recurse C:\tools | Where-Object { $_.Name -like 'gfortran*.exe' }
+            throw "gfortran.exe not found after installing MinGW."
+          }
+          "$mingwPath" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "FC=$mingwPath\gfortran.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "F77=$mingwPath\gfortran.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Using gfortran binary: $mingwPath\gfortran.exe"
       
       # Installer numpy
       - name: Install numpy
