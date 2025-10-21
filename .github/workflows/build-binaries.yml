@@ -76,7 +76,10 @@ jobs:
       - name: Fix macOS binary rpath
         if: runner.os == 'macOS'
         run: |
-          python << 'EOF'
+          # Get gcc library path
+          GCC_PREFIX="$(brew --prefix gcc)"
+
+          python << EOF
           import glob
           import subprocess
           import os
@@ -90,18 +93,20 @@ jobs:
           binary = binaries[0]
           print(f"Processing binary: {binary}")
 
-          # Get gcc library path
-          gcc_prefix = os.environ.get('GCC_PREFIX', subprocess.check_output(['brew', '--prefix', 'gcc']).decode().strip())
-          gcc_lib_path = f"{gcc_prefix}/lib/gcc/current"
+          # Get gcc prefix from environment
+          gcc_prefix = os.environ.get('GCC_PREFIX', '').strip()
+          if not gcc_prefix:
+              print("ERROR: GCC_PREFIX not set")
+              exit(1)
 
-          print(f"GCC library path: {gcc_lib_path}")
+          print(f"GCC prefix: {gcc_prefix}")
 
           # Get list of linked libraries
           result = subprocess.run(['otool', '-L', binary], capture_output=True, text=True)
-          print("Current dependencies:")
+          print("\n=== Current dependencies ===")
           print(result.stdout)
 
-          # Fix each GCC library dependency
+          # Fix each GCC library dependency to use @rpath
           for line in result.stdout.split('\n'):
               line = line.strip()
               if '/gcc/' in line or 'libgfortran' in line or 'libquadmath' in line or 'libgcc_s' in line:
@@ -111,35 +116,52 @@ jobs:
                       lib_name = os.path.basename(lib_path)
                       # Change to @rpath
                       new_path = f"@rpath/{lib_name}"
-                      print(f"Changing: {lib_path} -> {new_path}")
+                      print(f"\nChanging: {lib_path}")
+                      print(f"      to: {new_path}")
                       subprocess.run(['install_name_tool', '-change', lib_path, new_path, binary], check=True)
 
-          # Add rpath to find the libraries
-          print(f"Adding rpath: {gcc_lib_path}")
-          subprocess.run(['install_name_tool', '-add_rpath', gcc_lib_path, binary], check=True)
+          # Add multiple rpaths to support different Mac configurations
+          # This ensures the binary works on both Intel (/usr/local) and Apple Silicon (/opt/homebrew)
+          rpaths_to_add = [
+              f"{gcc_prefix}/lib/gcc/current",  # Current GCC libs (versioned symlink)
+              f"{gcc_prefix}/lib",              # General GCC lib directory
+              "/usr/local/opt/gcc/lib/gcc/current",  # Intel Mac Homebrew
+              "/usr/local/opt/gcc/lib",              # Intel Mac Homebrew fallback
+              "/opt/homebrew/opt/gcc/lib/gcc/current",  # Apple Silicon Homebrew
+              "/opt/homebrew/opt/gcc/lib",              # Apple Silicon Homebrew fallback
+          ]
 
-          # Also add Homebrew's lib directory as fallback
-          homebrew_lib = f"{gcc_prefix}/lib"
-          if homebrew_lib != gcc_lib_path:
-              print(f"Adding rpath: {homebrew_lib}")
-              subprocess.run(['install_name_tool', '-add_rpath', homebrew_lib, binary], check=True)
+          print("\n=== Adding rpaths ===")
+          for rpath in rpaths_to_add:
+              try:
+                  # Check if rpath already exists to avoid errors
+                  check_result = subprocess.run(['otool', '-l', binary], capture_output=True, text=True)
+                  if rpath not in check_result.stdout:
+                      print(f"Adding: {rpath}")
+                      subprocess.run(['install_name_tool', '-add_rpath', rpath, binary], check=False)
+                  else:
+                      print(f"Already exists: {rpath}")
+              except Exception as e:
+                  print(f"Warning: Could not add {rpath}: {e}")
 
           # Verify the changes
-          print("\nFinal dependencies:")
+          print("\n=== Final dependencies ===")
           result = subprocess.run(['otool', '-L', binary], capture_output=True, text=True)
           print(result.stdout)
 
-          print("\nRpaths:")
+          print("\n=== Configured rpaths ===")
           result = subprocess.run(['otool', '-l', binary], capture_output=True, text=True)
+          in_rpath_section = False
           for line in result.stdout.split('\n'):
-              if 'LC_RPATH' in line or 'path' in line:
+              if 'cmd LC_RPATH' in line:
+                  in_rpath_section = True
+              if in_rpath_section:
                   print(line)
-          EOF
+                  if line.strip().startswith('cmdsize'):
+                      in_rpath_section = False
 
-          # Set GCC_PREFIX for the script
-          if [ -z "$GCC_PREFIX" ]; then
-            export GCC_PREFIX="$(brew --prefix gcc)"
-          fi
+          print("\n✓ Binary processed successfully")
+          EOF
 
       # Rename the binary with a platform-specific suffix
       - name: Rename binary (Linux/macOS)
