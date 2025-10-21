@@ -1,10 +1,10 @@
 # PyHELP Fortran Binaries
 
-Pre-built HELP3O Fortran extension binaries maintained for the HydroModPy ecosystem and available for anyone who needs ready-to-use wheels or shared objects.
+Pre-built HELP3O Fortran extension binaries maintained for the HydroModPy ecosystem and available for anyone who needs ready-to-use shared libraries.
 
 ## Purpose
 
-This repository automates the compilation of the original `HELP3O.FOR` source so that HydroModPy installations—and any other projects that rely on HELP3O—can download a matching binary without compiling locally. Each tagged release on GitHub publishes the generated artifacts.
+This repository automates the compilation of the original `HELP3O.FOR` source so HydroModPy—and any downstream tools that rely on HELP3O—can download a matching binary without compiling locally. Each workflow run creates a dated GitHub Release (for example `v2025.10`) that bundles all supported platform builds.
 
 ## Supported Platforms
 
@@ -24,21 +24,13 @@ HELP3O.<python_tag>-<platform>.{so|pyd}
 ```
 
 Examples:
-- `HELP3O.cp311-cp311-linux_x86_64.so` – Linux, Python 3.11
-- `HELP3O.cp312-cp312-macosx_11_0_arm64.so` – macOS ARM, Python 3.12
-- `HELP3O.cp313-cp313-win_amd64.pyd` – Windows, Python 3.13
+- `HELP3O.cpython-311-x86_64-linux-gnu.so` – Linux, Python 3.11
+- `HELP3O.cpython-312-macosx_arm64.so` – macOS ARM, Python 3.12
+- `HELP3O.cp313-win_amd64.pyd` – Windows, Python 3.13
 
 ## Downloading Binaries
 
-Every release attaches the compiled files so they can be fetched directly, reused by HydroModPy, or integrated into other tooling that expects a pre-built HELP3O module.
-
-```bash
-# Download the binary that matches your Python version and platform
-wget https://github.com/bastien-boivin/HELP3O-binaries/releases/download/v1.0.0/HELP3O.cp311-cp311-linux_x86_64.so
-
-# Make it available to your Python environment
-mv HELP3O.*.so /path/to/your/project/
-```
+Every release attaches the compiled files so they can be fetched directly, reused by HydroModPy, or integrated into other tooling that expects a pre-built HELP3O module. Visit the [Releases page](https://github.com/bastien-boivin/HELP3O-binaries/releases) and download the asset that matches your Python version, platform and architecture. The checksums listed alongside each asset can be used to verify the download.
 
 ## Building Locally
 
@@ -54,6 +46,15 @@ pip install numpy
 # Build the extension in-place
 python build_extensions.py
 ```
+
+## Publishing A New Release (maintainers)
+
+Only maintainers with write access to this repository can publish a new set of binaries:
+
+1. Ensure the latest changes are pushed to `main`.
+2. Open GitHub → **Actions** → workflow **Build HELP3O Binaries** → **Run workflow** (keep the default branch).
+3. Wait for all matrix jobs to succeed; the workflow will automatically create a release tagged `vYYYY.MM` (or append `-RUN` if one already exists) and attach the 12 binaries.
+4. Share the release URL with downstream projects such as HydroModPy so they can retrieve the new artifacts.
 
 ## Contributing
 
