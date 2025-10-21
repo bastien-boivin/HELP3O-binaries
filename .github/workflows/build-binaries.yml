@@ -76,8 +76,8 @@ jobs:
       - name: Fix macOS binary rpath
         if: runner.os == 'macOS'
         run: |
-          # Get gcc library path
-          GCC_PREFIX="$(brew --prefix gcc)"
+          # Get gcc library path and export it
+          export GCC_PREFIX="$(brew --prefix gcc)"
 
           python << EOF
           import glob
