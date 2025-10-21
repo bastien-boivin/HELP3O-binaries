@@ -51,15 +51,7 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           choco install mingw -y
-          $gfortran = Get-ChildItem -Path C:\tools,C:\ProgramData\chocolatey -Filter gfortran.exe -Recurse | Select-Object -First 1
-          if (-not $gfortran) {
-            throw "gfortran.exe not found after installing MinGW."
-          }
-          $mingwPath = $gfortran.DirectoryName
-          "$mingwPath" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          "FC=$($gfortran.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "F77=$($gfortran.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "Using gfortran binary: $($gfortran.FullName)"
+          Add-Content $env:GITHUB_PATH 'C:\tools\mingw64\bin'
       
       # Installer numpy
       - name: Install numpy
