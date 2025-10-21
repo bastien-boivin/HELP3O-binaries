@@ -1,0 +1,17 @@
+# Binaires compilés (ne pas les committer dans Git)
+*.so
+*.pyd
+*.o
+*.mod
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Build artifacts
+.cache/
+.pytest_cache/

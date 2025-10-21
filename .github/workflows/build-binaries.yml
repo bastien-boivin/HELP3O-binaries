@@ -1,0 +1,94 @@
+name: Build HELP3O Binaries
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }} Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-20.04, macos-13, macos-14, windows-latest]
+        python: ['3.11', '3.12', '3.13']
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      
+      # Linux: installer gfortran
+      - name: Install gfortran (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gfortran
+      
+      # macOS: installer gfortran via brew
+      - name: Install gfortran (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install gcc
+      
+      # Windows: installer MinGW
+      - name: Install MinGW (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          choco install mingw -y
+      
+      # Installer numpy
+      - name: Install numpy
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy
+      
+      # Compiler HELP3O
+      - name: Build HELP3O extension
+        run: |
+          python build_extensions.py
+      
+      # Renommer le binaire avec un nom standard
+      - name: Rename binary (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          python << 'EOF'
+          import sys
+          import glob
+          from pathlib import Path
+          
+          binaries = glob.glob("HELP3O.*.so")
+          if binaries:
+              src = Path(binaries[0])
+              print(f"Found: {src}")
+          else:
+              print("ERROR: No binary found")
+              sys.exit(1)
+          EOF
+      
+      - name: Rename binary (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          python -c "import glob; print(glob.glob('HELP3O.*.pyd'))"
+      
+      # Upload comme artifact
+      - name: Upload binary artifact (Linux/macOS)
+        if: runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.os }}-py${{ matrix.python }}
+          path: HELP3O.*.so
+          if-no-files-found: error
+      
+      - name: Upload binary artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.os }}-py${{ matrix.python }}
+          path: HELP3O.*.pyd
+          if-no-files-found: error
