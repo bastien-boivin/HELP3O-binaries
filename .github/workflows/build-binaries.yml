@@ -132,17 +132,22 @@ jobs:
           ]
 
           print("\n=== Adding rpaths ===")
+          # Get existing rpaths once
+          check_result = subprocess.run(['otool', '-l', binary], capture_output=True, text=True)
+          existing_rpaths = check_result.stdout
+
           for rpath in rpaths_to_add:
-              try:
-                  # Check if rpath already exists to avoid errors
-                  check_result = subprocess.run(['otool', '-l', binary], capture_output=True, text=True)
-                  if rpath not in check_result.stdout:
-                      print(f"Adding: {rpath}")
-                      subprocess.run(['install_name_tool', '-add_rpath', rpath, binary], check=False)
-                  else:
-                      print(f"Already exists: {rpath}")
-              except Exception as e:
-                  print(f"Warning: Could not add {rpath}: {e}")
+              if rpath not in existing_rpaths:
+                  print(f"Adding: {rpath}")
+                  try:
+                      result = subprocess.run(['install_name_tool', '-add_rpath', rpath, binary],
+                                            capture_output=True, text=True)
+                      if result.returncode != 0:
+                          print(f"  Warning: {result.stderr.strip()}")
+                  except Exception as e:
+                      print(f"  Warning: Could not add {rpath}: {e}")
+              else:
+                  print(f"Already exists: {rpath}")
 
           # Verify the changes
           print("\n=== Final dependencies ===")
