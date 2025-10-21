@@ -3,6 +3,9 @@ name: Build HELP3O Binaries
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build ${{ matrix.os }} Python ${{ matrix.python }}
