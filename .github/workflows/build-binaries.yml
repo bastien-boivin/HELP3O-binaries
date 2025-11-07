@@ -52,9 +52,41 @@ jobs:
       # Windows: install MinGW
       - name: Install MinGW (Windows)
         if: runner.os == 'Windows'
+        shell: pwsh
         run: |
           choco install mingw -y
-          Add-Content $env:GITHUB_PATH 'C:\tools\mingw64\bin'
+
+          $msysBash = 'C:\msys64\usr\bin\bash.exe'
+          if (Test-Path $msysBash) {
+            Write-Host "Installing MSYS2 UCRT64 toolchain via pacman..."
+            & $msysBash -lc "pacman -Sy --noconfirm --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-gcc-fortran"
+          } else {
+            Write-Host "MSYS2 bash not found at $msysBash; skipping pacman install."
+          }
+
+          $toolchainPaths = @(
+            'C:\msys64\ucrt64\bin',
+            'C:\tools\mingw64\bin'
+          )
+          foreach ($path in $toolchainPaths) {
+            if (Test-Path $path) {
+              Write-Host "Adding $path to PATH"
+              Add-Content $env:GITHUB_PATH $path
+            }
+          }
+
+          $compilerCandidates = @(
+            'C:\msys64\ucrt64\bin\gfortran.exe',
+            'C:\tools\mingw64\bin\gfortran.exe'
+          )
+          foreach ($candidate in $compilerCandidates) {
+            if (Test-Path $candidate) {
+              Write-Host "Setting FC/F77 to $candidate"
+              Add-Content $env:GITHUB_ENV "FC=$candidate"
+              Add-Content $env:GITHUB_ENV "F77=$candidate"
+              break
+            }
+          }
 
       # Install numpy
       - name: Install numpy
@@ -268,15 +300,27 @@ jobs:
           Write-Host "=== Binary: $($binary.Name) ==="
 
           # Find MinGW installation (could be in different locations)
-          $possiblePaths = @(
+          $fcPath = $env:FC
+          $candidatePaths = @()
+          if ($fcPath) {
+            $fcDir = Split-Path -Parent $fcPath
+            if ($fcDir -and (Test-Path $fcDir)) {
+              $candidatePaths += $fcDir
+            }
+          }
+
+          $candidatePaths += @(
+            "C:\msys64\ucrt64\bin",
             "C:\tools\mingw64\bin",
             "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin",
             "C:\msys64\mingw64\bin",
             "C:\mingw64\bin"
           )
 
+          $candidatePaths = $candidatePaths | Where-Object { $_ -and ($_ -ne "") } | Select-Object -Unique
+
           $mingw = $null
-          foreach ($path in $possiblePaths) {
+          foreach ($path in $candidatePaths) {
             if (Test-Path $path) {
               $mingw = $path
               Write-Host "Found MinGW at: $mingw"
@@ -294,7 +338,7 @@ jobs:
             } else {
               Write-Host "ERROR: Cannot find MinGW installation"
               Write-Host "Checked paths:"
-              $possiblePaths | ForEach-Object { Write-Host "  $_" }
+              $candidatePaths | ForEach-Object { Write-Host "  $_" }
               exit 1
             }
           }
