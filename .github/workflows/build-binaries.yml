@@ -213,6 +213,7 @@ jobs:
               print(f"Renamed {src.name} -> {binary_name}")
 
           # Create tarball with binary + dylibs
+          # Files will be at root of tarball (not in a subfolder) for easy extraction
           dylibs = glob.glob("*.dylib")
           tarball_name = binary_name.replace('.so', '_bundle.tar.gz')
 
@@ -220,12 +221,14 @@ jobs:
           print(f"  Binary: {binary_name}")
           print(f"  Libraries: {', '.join([Path(d).name for d in dylibs])}")
 
+          # Use arcname to put files at root (no directory structure)
           with tarfile.open(tarball_name, 'w:gz') as tar:
               tar.add(binary_name, arcname=Path(binary_name).name)
               for dylib in dylibs:
                   tar.add(dylib, arcname=Path(dylib).name)
 
           print(f"\n✓ Bundle created: {tarball_name}")
+          print(f"  Files will extract to root of destination directory")
 
           # Also keep the standalone binary for backward compatibility
           print(f"✓ Standalone binary: {binary_name}")
@@ -338,11 +341,18 @@ jobs:
           }
 
           # Create zip with Python version in name to avoid conflicts
+          # Files will be at root of zip (not in a subfolder) for easy extraction
           $pyVersion = $binary.Name -replace 'HELP3O\.cp(\d+)-.*', '$1'
           $zipPath = "HELP3O.cp$pyVersion-win_amd64_bundle.zip"
           if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
-          Compress-Archive -Path (Join-Path $bundleDir '*') -DestinationPath $zipPath -Force
+
+          # Use -Path with wildcard to put files at root of zip
+          Compress-Archive -Path "$bundleDir\*" -DestinationPath $zipPath -CompressionLevel Optimal -Force
           Write-Host "`n✓ Windows bundle created: $zipPath"
+
+          # Clean up temporary directory
+          Remove-Item $bundleDir -Recurse -Force
+          Write-Host "Cleaned up temporary bundle directory"
 
       # Rename binary (Windows) – keep standalone .pyd for backward compatibility
       - name: List Windows binaries
