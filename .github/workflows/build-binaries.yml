@@ -337,8 +337,9 @@ jobs:
             Write-Host "`nWARNING: Only binary bundled, no runtime DLLs found!"
           }
 
-          # Create zip
-          $zipPath = "HELP3O_win_bundle.zip"
+          # Create zip with Python version in name to avoid conflicts
+          $pyVersion = $binary.Name -replace 'HELP3O\.cp(\d+)-.*', '$1'
+          $zipPath = "HELP3O.cp$pyVersion-win_amd64_bundle.zip"
           if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
           Compress-Archive -Path (Join-Path $bundleDir '*') -DestinationPath $zipPath -Force
           Write-Host "`n✓ Windows bundle created: $zipPath"
@@ -376,7 +377,7 @@ jobs:
           name: binary-${{ matrix.os }}-py${{ matrix.python }}
           path: |
             HELP3O.*.pyd
-            HELP3O_win_bundle.zip
+            HELP3O.*_bundle.zip
           if-no-files-found: error
 
   release:
