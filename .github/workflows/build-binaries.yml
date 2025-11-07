@@ -59,14 +59,34 @@ jobs:
           $msysBash = 'C:\msys64\usr\bin\bash.exe'
           if (Test-Path $msysBash) {
             Write-Host "Installing MSYS2 UCRT64 toolchain via pacman..."
-            & $msysBash -lc "pacman -Sy --noconfirm --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-gcc-fortran mingw-w64-ucrt-x86_64-gcc-libs mingw-w64-ucrt-x86_64-libssp"
+            & $msysBash -lc "pacman -Sy --noconfirm --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-gcc-fortran mingw-w64-ucrt-x86_64-gcc-libs"
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "Failed to install core MSYS2 toolchain packages."
+              exit 1
+            }
+
+            $optionalPackages = @(
+              "mingw-w64-ucrt-x86_64-libssp",
+              "mingw-w64-x86_64-libssp"
+            )
+
+            foreach ($pkg in $optionalPackages) {
+              Write-Host "Attempting to install optional package: $pkg"
+              & $msysBash -lc "pacman -Sy --noconfirm --needed $pkg"
+              if ($LASTEXITCODE -ne 0) {
+                Write-Warning "Could not install optional package $pkg (exit code $LASTEXITCODE). Continuing without it."
+              } else {
+                Write-Host "Installed optional package $pkg"
+              }
+            }
           } else {
             Write-Host "MSYS2 bash not found at $msysBash; skipping pacman install."
           }
 
           $toolchainPaths = @(
             'C:\msys64\ucrt64\bin',
-            'C:\tools\mingw64\bin'
+            'C:\tools\mingw64\bin',
+            'C:\ProgramData\mingw64\mingw64\bin'
           )
           foreach ($path in $toolchainPaths) {
             if (Test-Path $path) {
@@ -312,6 +332,7 @@ jobs:
           $candidatePaths += @(
             "C:\msys64\ucrt64\bin",
             "C:\tools\mingw64\bin",
+            "C:\ProgramData\mingw64\mingw64\bin",
             "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin",
             "C:\msys64\mingw64\bin",
             "C:\mingw64\bin"
