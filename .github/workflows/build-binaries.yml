@@ -263,13 +263,37 @@ jobs:
           }
 
           Write-Host "=== Binary: $($binary.Name) ==="
-          Write-Host "=== Checking dependencies with dumpbin ==="
 
-          # Try to use dumpbin if available (from Visual Studio)
-          try {
-            dumpbin /dependents $binary.FullName 2>&1 | Write-Host
-          } catch {
-            Write-Host "dumpbin not available, will copy common MinGW DLLs"
+          # Find MinGW installation (could be in different locations)
+          $possiblePaths = @(
+            "C:\tools\mingw64\bin",
+            "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin",
+            "C:\msys64\mingw64\bin",
+            "C:\mingw64\bin"
+          )
+
+          $mingw = $null
+          foreach ($path in $possiblePaths) {
+            if (Test-Path $path) {
+              $mingw = $path
+              Write-Host "Found MinGW at: $mingw"
+              break
+            }
+          }
+
+          if (-not $mingw) {
+            Write-Host "WARNING: MinGW not found in standard locations. Searching..."
+            # Try to find gfortran in PATH
+            $gfortran = Get-Command gfortran -ErrorAction SilentlyContinue
+            if ($gfortran) {
+              $mingw = Split-Path -Parent $gfortran.Source
+              Write-Host "Found gfortran in PATH at: $mingw"
+            } else {
+              Write-Host "ERROR: Cannot find MinGW installation"
+              Write-Host "Checked paths:"
+              $possiblePaths | ForEach-Object { Write-Host "  $_" }
+              exit 1
+            }
           }
 
           # Create bundle directory
@@ -278,8 +302,7 @@ jobs:
           New-Item -ItemType Directory -Path $bundleDir | Out-Null
           Copy-Item $binary.FullName $bundleDir
 
-          # Find all DLL files in MinGW bin directory
-          $mingw = "C:\tools\mingw64\bin"
+          # List available DLLs
           Write-Host "`n=== Available DLLs in $mingw ==="
           Get-ChildItem -Path $mingw -Filter "*.dll" | Select-Object -First 20 | ForEach-Object { Write-Host $_.Name }
 
@@ -294,15 +317,25 @@ jobs:
           Write-Host "`n=== Copying runtime DLLs ==="
           foreach ($pattern in $dllPatterns) {
             $found = Get-ChildItem -Path $mingw -Filter $pattern -ErrorAction SilentlyContinue
-            foreach ($dll in $found) {
-              Write-Host "  Copying: $($dll.Name)"
-              Copy-Item $dll.FullName $bundleDir -ErrorAction SilentlyContinue
+            if ($found) {
+              foreach ($dll in $found) {
+                Write-Host "  Copying: $($dll.Name)"
+                Copy-Item $dll.FullName $bundleDir -ErrorAction Stop
+              }
+            } else {
+              Write-Host "  WARNING: No DLLs found matching $pattern"
             }
           }
 
           # List what we bundled
           Write-Host "`n=== Bundled files ==="
           Get-ChildItem $bundleDir | ForEach-Object { Write-Host "  $($_.Name)" }
+
+          # Check if we got at least the binary
+          $bundledFiles = Get-ChildItem $bundleDir
+          if ($bundledFiles.Count -eq 1) {
+            Write-Host "`nWARNING: Only binary bundled, no runtime DLLs found!"
+          }
 
           # Create zip
           $zipPath = "HELP3O_win_bundle.zip"
