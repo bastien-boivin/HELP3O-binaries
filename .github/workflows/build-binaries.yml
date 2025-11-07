@@ -59,7 +59,7 @@ jobs:
           $msysBash = 'C:\msys64\usr\bin\bash.exe'
           if (Test-Path $msysBash) {
             Write-Host "Installing MSYS2 UCRT64 toolchain via pacman..."
-            & $msysBash -lc "pacman -Sy --noconfirm --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-gcc-fortran mingw-w64-ucrt-x86_64-gcc-libs"
+            & $msysBash -lc "pacman -Sy --noconfirm --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-gcc-fortran mingw-w64-ucrt-x86_64-gcc-libs mingw-w64-ucrt-x86_64-libssp"
           } else {
             Write-Host "MSYS2 bash not found at $msysBash; skipping pacman install."
           }
@@ -361,6 +361,15 @@ jobs:
             "C:\msys64\ucrt64\bin",
             "C:\msys64\ucrt64\lib"
           )
+          $gccLibRoot = "C:\msys64\ucrt64\lib\gcc"
+          if (Test-Path $gccLibRoot) {
+            $gccSubdirs = Get-ChildItem -Path $gccLibRoot -Directory -Recurse -ErrorAction SilentlyContinue |
+              Select-Object -ExpandProperty FullName -ErrorAction SilentlyContinue
+            if ($gccSubdirs) {
+              $searchRoots += $gccSubdirs
+            }
+          }
+
           $searchRoots = $searchRoots | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
 
           if (-not $searchRoots) {
