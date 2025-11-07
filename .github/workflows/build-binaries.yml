@@ -328,8 +328,21 @@ jobs:
           $zipPath = "HELP3O.cp$pyVersion-win_amd64_bundle.zip"
           if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
 
-          Compress-Archive -Path $binary.FullName -DestinationPath $zipPath -CompressionLevel Optimal -Force
-          Write-Host "✓ Windows static archive created: $zipPath"
+          $helperDlls = Get-ChildItem -Filter "libHELP3O*.dll" -ErrorAction SilentlyContinue
+          if ($helperDlls) {
+            Write-Host "Found helper DLLs:"
+            $helperDlls | ForEach-Object { Write-Host "  $_" }
+          } else {
+            Write-Warning "No libHELP3O*.dll helper libraries found; Windows import may fail."
+          }
+
+          $pathsToArchive = @($binary.FullName)
+          if ($helperDlls) {
+            $pathsToArchive += $helperDlls | ForEach-Object { $_.FullName }
+          }
+
+          Compress-Archive -Path $pathsToArchive -DestinationPath $zipPath -CompressionLevel Optimal -Force
+          Write-Host "✓ Windows static archive created: $zipPath (includes helper DLLs if present)"
 
       # List Windows binaries
       - name: List Windows binaries
