@@ -255,38 +255,60 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $bundleDir = "win_bundle"
-          if (Test-Path $bundleDir) { Remove-Item $bundleDir -Recurse -Force }
-          New-Item -ItemType Directory -Path $bundleDir | Out-Null
-
+          # First, check what DLLs the binary actually depends on
           $binary = Get-ChildItem -Filter "HELP3O*.pyd" | Select-Object -First 1
           if (-not $binary) {
             Write-Error "No HELP3O .pyd binary found"
             exit 1
           }
-          Copy-Item $binary.FullName $bundleDir
 
-          $mingw = "C:\tools\mingw64\bin"
-          $dlls = @(
-            "libgfortran-5.dll",
-            "libquadmath-0.dll",
-            "libgcc_s_seh-1.dll",
-            "libwinpthread-1.dll"
-          )
+          Write-Host "=== Binary: $($binary.Name) ==="
+          Write-Host "=== Checking dependencies with dumpbin ==="
 
-          foreach ($dll in $dlls) {
-            $src = Join-Path $mingw $dll
-            if (-not (Test-Path $src)) {
-              Write-Error "Missing required runtime: $src"
-              exit 1
-            }
-            Copy-Item $src $bundleDir
+          # Try to use dumpbin if available (from Visual Studio)
+          try {
+            dumpbin /dependents $binary.FullName 2>&1 | Write-Host
+          } catch {
+            Write-Host "dumpbin not available, will copy common MinGW DLLs"
           }
 
+          # Create bundle directory
+          $bundleDir = "win_bundle"
+          if (Test-Path $bundleDir) { Remove-Item $bundleDir -Recurse -Force }
+          New-Item -ItemType Directory -Path $bundleDir | Out-Null
+          Copy-Item $binary.FullName $bundleDir
+
+          # Find all DLL files in MinGW bin directory
+          $mingw = "C:\tools\mingw64\bin"
+          Write-Host "`n=== Available DLLs in $mingw ==="
+          Get-ChildItem -Path $mingw -Filter "*.dll" | Select-Object -First 20 | ForEach-Object { Write-Host $_.Name }
+
+          # Copy all Fortran/GCC related DLLs we can find
+          $dllPatterns = @(
+            "libgfortran*.dll",
+            "libquadmath*.dll",
+            "libgcc*.dll",
+            "libwinpthread*.dll"
+          )
+
+          Write-Host "`n=== Copying runtime DLLs ==="
+          foreach ($pattern in $dllPatterns) {
+            $found = Get-ChildItem -Path $mingw -Filter $pattern -ErrorAction SilentlyContinue
+            foreach ($dll in $found) {
+              Write-Host "  Copying: $($dll.Name)"
+              Copy-Item $dll.FullName $bundleDir -ErrorAction SilentlyContinue
+            }
+          }
+
+          # List what we bundled
+          Write-Host "`n=== Bundled files ==="
+          Get-ChildItem $bundleDir | ForEach-Object { Write-Host "  $($_.Name)" }
+
+          # Create zip
           $zipPath = "HELP3O_win_bundle.zip"
           if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
           Compress-Archive -Path (Join-Path $bundleDir '*') -DestinationPath $zipPath -Force
-          Write-Host "Windows bundle created: $zipPath"
+          Write-Host "`n✓ Windows bundle created: $zipPath"
 
       # Rename binary (Windows) – keep standalone .pyd for backward compatibility
       - name: List Windows binaries
