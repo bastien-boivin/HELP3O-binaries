@@ -347,6 +347,47 @@ jobs:
             Write-Warning "No libHELP3O*.dll helper libraries found; Windows import may fail."
           }
 
+          # Copy MinGW runtime dependencies that the helper DLL may still reference
+          $fcPath = $env:FC
+          $runtimeSearchDirs = @()
+          if ($fcPath) {
+            $fcDir = Split-Path -Parent $fcPath
+            if ($fcDir) { $runtimeSearchDirs += $fcDir }
+          }
+          $runtimeSearchDirs += @(
+            "C:\msys64\ucrt64\bin",
+            "C:\tools\mingw64\bin",
+            "C:\ProgramData\mingw64\mingw64\bin",
+            "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin",
+            "C:\msys64\mingw64\bin",
+            "C:\mingw64\bin"
+          )
+          $runtimeSearchDirs = $runtimeSearchDirs | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+
+          $runtimeDlls = @(
+            "libgfortran-5.dll",
+            "libquadmath-0.dll",
+            "libgcc_s_seh-1.dll",
+            "libwinpthread-1.dll",
+            "libstdc++-6.dll",
+            "libssp-0.dll"
+          )
+          $copiedRuntimeDlls = @()
+          foreach ($dllName in $runtimeDlls) {
+            $found = $null
+            foreach ($dir in $runtimeSearchDirs) {
+              $candidate = Join-Path $dir $dllName
+              if (Test-Path $candidate) { $found = $candidate; break }
+            }
+            if ($found) {
+              Write-Host "Including runtime DLL $dllName from $found"
+              Copy-Item $found (Join-Path $bundleDir $dllName) -Force
+              $copiedRuntimeDlls += $dllName
+            } else {
+              Write-Warning "Could not locate runtime DLL $dllName in search paths."
+            }
+          }
+
           # Copy matching pythonXY.dll so the extension can load even in stripped PATH environments
           $pythonDllName = "python$pyVersion.dll"
           $pythonExe = (Get-Command python).Source
