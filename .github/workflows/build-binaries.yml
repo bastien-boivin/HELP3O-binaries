@@ -362,7 +362,9 @@ jobs:
             "libgfortran*.dll",
             "libquadmath*.dll",
             "libgcc*.dll",
-            "libwinpthread*.dll"
+            "libwinpthread*.dll",
+            "libstdc++*.dll",
+            "libssp*.dll"
           )
 
           Write-Host "`n=== Copying runtime DLLs ==="
