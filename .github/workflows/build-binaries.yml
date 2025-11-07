@@ -75,6 +75,7 @@ jobs:
               & $msysBash -lc "pacman -Sy --noconfirm --needed $pkg"
               if ($LASTEXITCODE -ne 0) {
                 Write-Warning "Could not install optional package $pkg (exit code $LASTEXITCODE). Continuing without it."
+                $global:LASTEXITCODE = 0
               } else {
                 Write-Host "Installed optional package $pkg"
               }
@@ -305,231 +306,32 @@ jobs:
           print(f"Linux binary: {src.name}")
           EOF
 
-      # Bundle MinGW runtime for Windows
-      - name: Bundle MinGW runtime (Windows)
+      # Package Windows static binary
+      - name: Package Windows binary (static)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          # First, check what DLLs the binary actually depends on
           $binary = Get-ChildItem -Filter "HELP3O*.pyd" | Select-Object -First 1
           if (-not $binary) {
             Write-Error "No HELP3O .pyd binary found"
             exit 1
           }
 
-          Write-Host "=== Binary: $($binary.Name) ==="
+          Write-Host "Static HELP3O binary: $($binary.Name)"
 
-          # Find MinGW installation (could be in different locations)
-          $fcPath = $env:FC
-          $candidatePaths = @()
-          if ($fcPath) {
-            $fcDir = Split-Path -Parent $fcPath
-            if ($fcDir -and (Test-Path $fcDir)) {
-              $candidatePaths += $fcDir
-            }
-          }
-
-          $candidatePaths += @(
-            "C:\msys64\ucrt64\bin",
-            "C:\tools\mingw64\bin",
-            "C:\ProgramData\mingw64\mingw64\bin",
-            "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin",
-            "C:\msys64\mingw64\bin",
-            "C:\mingw64\bin"
-          )
-
-          $candidatePaths = $candidatePaths | Where-Object { $_ -and ($_ -ne "") } | Select-Object -Unique
-
-          $mingw = $null
-          foreach ($path in $candidatePaths) {
-            if (Test-Path $path) {
-              $mingw = $path
-              Write-Host "Found MinGW at: $mingw"
-              break
-            }
-          }
-
-          if (-not $mingw) {
-            Write-Host "WARNING: MinGW not found in standard locations. Searching..."
-            # Try to find gfortran in PATH
-            $gfortran = Get-Command gfortran -ErrorAction SilentlyContinue
-            if ($gfortran) {
-              $mingw = Split-Path -Parent $gfortran.Source
-              Write-Host "Found gfortran in PATH at: $mingw"
-            } else {
-              Write-Host "ERROR: Cannot find MinGW installation"
-              Write-Host "Checked paths:"
-              $candidatePaths | ForEach-Object { Write-Host "  $_" }
-              exit 1
-            }
-          }
-
-          if ($mingw) {
-            Write-Host "`nUsing MinGW DLL search root: $mingw"
-          }
-
-          # Build exhaustive search roots so we can still grab DLLs that live outside the active compiler folder
-          $searchRoots = @()
-          if ($mingw) {
-            $searchRoots += $mingw
-            $mingwParent = Split-Path $mingw -Parent
-            if ($mingwParent) {
-              $searchRoots += $mingwParent
-            }
-          }
-          $searchRoots += $candidatePaths
-          $searchRoots += @(
-            "C:\msys64\ucrt64\bin",
-            "C:\msys64\ucrt64\lib"
-          )
-          $gccLibRoot = "C:\msys64\ucrt64\lib\gcc"
-          if (Test-Path $gccLibRoot) {
-            $gccSubdirs = Get-ChildItem -Path $gccLibRoot -Directory -Recurse -ErrorAction SilentlyContinue |
-              Select-Object -ExpandProperty FullName -ErrorAction SilentlyContinue
-            if ($gccSubdirs) {
-              $searchRoots += $gccSubdirs
-            }
-          }
-
-          $searchRoots = $searchRoots | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
-
-          if (-not $searchRoots) {
-            Write-Error "No valid DLL search roots found. Cannot continue bundling."
-            exit 1
-          }
-
-          Write-Host "`nDLL search roots:"
-          $searchRoots | ForEach-Object { Write-Host "  $_" }
-
-          # Determine the DLL names reported by dumpbin (if available)
-          $defaultRuntimeDlls = @(
-            "libgfortran-5.dll",
-            "libquadmath-0.dll",
-            "libgcc_s_seh-1.dll",
-            "libwinpthread-1.dll",
-            "libstdc++-6.dll",
-            "libssp-0.dll"
-          )
-
-          $dumpbinPath = $null
-          try {
-            $dumpbinCmd = Get-Command dumpbin -ErrorAction Stop
-            if ($dumpbinCmd) {
-              $dumpbinPath = $dumpbinCmd.Source
-            }
-          } catch {
-            $vswhereRoot = ${env:ProgramFiles(x86)}
-            if ($vswhereRoot) {
-              $vswhere = Join-Path $vswhereRoot "Microsoft Visual Studio\Installer\vswhere.exe"
-              if (Test-Path $vswhere) {
-                $vsInstallPath = & $vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-                if ($vsInstallPath) {
-                  $dumpbinCandidate = Get-ChildItem -Path (Join-Path $vsInstallPath "VC\Tools\MSVC") -Filter dumpbin.exe -Recurse -ErrorAction SilentlyContinue |
-                    Sort-Object LastWriteTime -Descending | Select-Object -First 1
-                  if ($dumpbinCandidate) {
-                    $dumpbinPath = $dumpbinCandidate.FullName
-                  }
-                }
-              }
-            }
-          }
-
-          $dependencyDlls = @()
-          if ($dumpbinPath) {
-            Write-Host "`nRunning dumpbin to inspect $($binary.Name) dependencies..."
-            $dumpbinOutput = & $dumpbinPath /dependents $binary.FullName
-            $dependencyDlls = $dumpbinOutput | ForEach-Object {
-              if ($_ -match '^\s*([A-Za-z0-9_\-\+\.]+\.dll)\s*$') {
-                $matches[1].ToLower()
-              }
-            } | Where-Object { $_ -match '^lib' } | Sort-Object -Unique
-            if ($dependencyDlls.Count -gt 0) {
-              Write-Host "dumpbin reported the following runtime DLLs:"
-              $dependencyDlls | ForEach-Object { Write-Host "  $_" }
-            } else {
-              Write-Host "dumpbin did not list any lib*-style dependencies."
-            }
-          } else {
-            Write-Warning "dumpbin not available; falling back to static DLL list."
-          }
-
-          $runtimeDllTargets = $dependencyDlls | Where-Object { $_ -match '^lib(gfortran|quadmath|gcc|winpthread|stdc\+\+|ssp)' }
-          if (-not $runtimeDllTargets -or $runtimeDllTargets.Count -eq 0) {
-            $runtimeDllTargets = $defaultRuntimeDlls
-          }
-
-          Write-Host "`nRuntime DLL targets:"
-          $runtimeDllTargets | ForEach-Object { Write-Host "  $_" }
-
-          # Create bundle directory
-          $bundleDir = "win_bundle"
-          if (Test-Path $bundleDir) { Remove-Item $bundleDir -Recurse -Force }
-          New-Item -ItemType Directory -Path $bundleDir | Out-Null
-          Copy-Item $binary.FullName $bundleDir
-
-          # List available DLLs
-          Write-Host "`n=== Available DLLs in $mingw ==="
-          Get-ChildItem -Path $mingw -Filter "*.dll" | Select-Object -First 20 | ForEach-Object { Write-Host $_.Name }
-
-          Write-Host "`n=== Copying runtime DLLs ==="
-          $copiedDlls = @()
-          foreach ($dllName in $runtimeDllTargets) {
-            $found = @()
-            foreach ($root in $searchRoots) {
-              $candidate = Join-Path $root $dllName
-              if (Test-Path $candidate) {
-                $found += Get-Item $candidate
-              }
-            }
-            if (-not $found) {
-              foreach ($root in $searchRoots) {
-                Write-Host "  Searching recursively under $root for $dllName..."
-                $found += Get-ChildItem -Path $root -Filter $dllName -Recurse -ErrorAction SilentlyContinue
-              }
-            }
-
-            if ($found) {
-              $found = $found | Sort-Object -Property FullName -Unique
-              foreach ($dll in $found) {
-                $target = Join-Path $bundleDir $dll.Name
-                Write-Host "  Copying: $($dll.FullName)"
-                Copy-Item $dll.FullName $target -Force -ErrorAction Stop
-                if ($copiedDlls -notcontains $dll.Name) {
-                  $copiedDlls += $dll.Name
-                }
-                break
-              }
-            } else {
-              Write-Host "  WARNING: Could not locate $dllName in provided search roots."
-            }
-          }
-
-          # List what we bundled
-          Write-Host "`n=== Bundled files ==="
-          Get-ChildItem $bundleDir | ForEach-Object { Write-Host "  $($_.Name)" }
-
-          # Check if we got all targeted DLLs
-          $missingDlls = $runtimeDllTargets | Where-Object { $copiedDlls -notcontains $_ }
-          if ($missingDlls -and $missingDlls.Count -gt 0) {
-            Write-Error "`nERROR: Failed to bundle the following DLLs: $($missingDlls -join ', ')"
-            exit 1
-          }
-
-          # Create zip with Python version in name to avoid conflicts
-          # Files will be at root of zip (not in a subfolder) for easy extraction
           $pyVersion = $binary.Name -replace 'HELP3O\.cp(\d+)-.*', '$1'
+          if (-not $pyVersion) {
+            Write-Error "Unable to detect CPython tag from $($binary.Name)"
+            exit 1
+          }
+
           $zipPath = "HELP3O.cp$pyVersion-win_amd64_bundle.zip"
           if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
 
-          # Use -Path with wildcard to put files at root of zip
-          Compress-Archive -Path "$bundleDir\*" -DestinationPath $zipPath -CompressionLevel Optimal -Force
-          Write-Host "`n✓ Windows bundle created: $zipPath"
+          Compress-Archive -Path $binary.FullName -DestinationPath $zipPath -CompressionLevel Optimal -Force
+          Write-Host "✓ Windows static archive created: $zipPath"
 
-          # Clean up temporary directory
-          Remove-Item $bundleDir -Recurse -Force
-          Write-Host "Cleaned up temporary bundle directory"
-
-      # Rename binary (Windows) – keep standalone .pyd for backward compatibility
+      # List Windows binaries
       - name: List Windows binaries
         if: runner.os == 'Windows'
         shell: pwsh

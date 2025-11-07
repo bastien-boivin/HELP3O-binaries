@@ -3,6 +3,7 @@
 Utility to build HELP3O.FOR as a Python extension.
 Compatible with numpy.f2py and meson.
 """
+import os
 import subprocess
 import sys
 import platform
@@ -25,6 +26,7 @@ def build_help3o():
         '-c', '-m', 'HELP3O',
         str(fortran_source),
     ]
+    env = os.environ.copy()
 
     # Add static linking flags for macOS to avoid runtime GCC dependencies
     if platform.system() == 'Darwin':
@@ -33,11 +35,18 @@ def build_help3o():
         cmd.extend(['--f90flags=' + static_flags])
         cmd.extend(['--f77flags=' + static_flags])
         print(f"macOS detected: adding static linking flags")
+    elif platform.system() == 'Windows':
+        # Try to statically link the MinGW runtime to avoid shipping DLLs
+        static_link_flags = "-static -static-libgcc -static-libgfortran -static-libstdc++ -static-libquadmath -static-libssp"
+        env["NPY_DISTUTILS_APPEND_FLAGS"] = "1"
+        env["LDFLAGS"] = (env.get("LDFLAGS", "").strip() + " " + static_link_flags).strip()
+        env["OPT"] = (env.get("OPT", "").strip() + " -static").strip()
+        print("Windows detected: enabling static MinGW linking via LDFLAGS/OPT.")
 
     print(f"Command: {' '.join(cmd)}")
     
     try:
-        subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True, env=env)
         print("Compilation succeeded.")
         
         # Locate the generated .so/.pyd file
