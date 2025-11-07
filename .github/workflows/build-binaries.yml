@@ -59,7 +59,7 @@ jobs:
           $msysBash = 'C:\msys64\usr\bin\bash.exe'
           if (Test-Path $msysBash) {
             Write-Host "Installing MSYS2 UCRT64 toolchain via pacman..."
-            & $msysBash -lc "pacman -Sy --noconfirm --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-gcc-fortran"
+            & $msysBash -lc "pacman -Sy --noconfirm --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-gcc-fortran mingw-w64-ucrt-x86_64-gcc-libs"
           } else {
             Write-Host "MSYS2 bash not found at $msysBash; skipping pacman install."
           }
