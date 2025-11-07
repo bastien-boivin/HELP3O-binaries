@@ -36,8 +36,9 @@ def build_help3o():
         cmd.extend(['--f77flags=' + static_flags])
         print(f"macOS detected: adding static linking flags")
     elif platform.system() == 'Windows':
-        # Try to statically link the MinGW runtime to avoid shipping DLLs
-        static_link_flags = "-static -static-libgcc -static-libgfortran -static-libstdc++ -static-libquadmath -static-libssp"
+        # Try to statically link the MinGW runtime to avoid shipping DLLs.
+        # Some MinGW toolchains do not support -static-libssp, so rely on the default lib.
+        static_link_flags = "-static -static-libgcc -static-libgfortran -static-libstdc++ -static-libquadmath"
         env["NPY_DISTUTILS_APPEND_FLAGS"] = "1"
         env["LDFLAGS"] = (env.get("LDFLAGS", "").strip() + " " + static_link_flags).strip()
         env["OPT"] = (env.get("OPT", "").strip() + " -static").strip()
