@@ -347,6 +347,30 @@ jobs:
             Write-Host "`nUsing MinGW DLL search root: $mingw"
           }
 
+          # Build exhaustive search roots so we can still grab DLLs that live outside the active compiler folder
+          $searchRoots = @()
+          if ($mingw) {
+            $searchRoots += $mingw
+            $mingwParent = Split-Path $mingw -Parent
+            if ($mingwParent) {
+              $searchRoots += $mingwParent
+            }
+          }
+          $searchRoots += $candidatePaths
+          $searchRoots += @(
+            "C:\msys64\ucrt64\bin",
+            "C:\msys64\ucrt64\lib"
+          )
+          $searchRoots = $searchRoots | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+
+          if (-not $searchRoots) {
+            Write-Error "No valid DLL search roots found. Cannot continue bundling."
+            exit 1
+          }
+
+          Write-Host "`nDLL search roots:"
+          $searchRoots | ForEach-Object { Write-Host "  $_" }
+
           # Create bundle directory
           $bundleDir = "win_bundle"
           if (Test-Path $bundleDir) { Remove-Item $bundleDir -Recurse -Force }
@@ -370,12 +394,14 @@ jobs:
           Write-Host "`n=== Copying runtime DLLs ==="
           $copiedDlls = @()
           foreach ($pattern in $dllPatterns) {
-            $found = Get-ChildItem -Path $mingw -Filter $pattern -ErrorAction SilentlyContinue
+            $found = @()
+            foreach ($root in $searchRoots) {
+              $found += Get-ChildItem -Path $root -Filter $pattern -ErrorAction SilentlyContinue
+            }
             if (-not $found) {
-              $mingwRoot = Split-Path $mingw -Parent
-              if ($mingwRoot -and (Test-Path $mingwRoot)) {
-                Write-Host "  Searching recursively under $mingwRoot for $pattern..."
-                $found = Get-ChildItem -Path $mingwRoot -Filter $pattern -Recurse -ErrorAction SilentlyContinue
+              foreach ($root in $searchRoots) {
+                Write-Host "  Searching recursively under $root for $pattern..."
+                $found += Get-ChildItem -Path $root -Filter $pattern -Recurse -ErrorAction SilentlyContinue
               }
             }
             if ($found) {
