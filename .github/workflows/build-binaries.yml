@@ -371,6 +371,66 @@ jobs:
           Write-Host "`nDLL search roots:"
           $searchRoots | ForEach-Object { Write-Host "  $_" }
 
+          # Determine the DLL names reported by dumpbin (if available)
+          $defaultRuntimeDlls = @(
+            "libgfortran-5.dll",
+            "libquadmath-0.dll",
+            "libgcc_s_seh-1.dll",
+            "libwinpthread-1.dll",
+            "libstdc++-6.dll",
+            "libssp-0.dll"
+          )
+
+          $dumpbinPath = $null
+          try {
+            $dumpbinCmd = Get-Command dumpbin -ErrorAction Stop
+            if ($dumpbinCmd) {
+              $dumpbinPath = $dumpbinCmd.Source
+            }
+          } catch {
+            $vswhereRoot = ${env:ProgramFiles(x86)}
+            if ($vswhereRoot) {
+              $vswhere = Join-Path $vswhereRoot "Microsoft Visual Studio\Installer\vswhere.exe"
+              if (Test-Path $vswhere) {
+                $vsInstallPath = & $vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+                if ($vsInstallPath) {
+                  $dumpbinCandidate = Get-ChildItem -Path (Join-Path $vsInstallPath "VC\Tools\MSVC") -Filter dumpbin.exe -Recurse -ErrorAction SilentlyContinue |
+                    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+                  if ($dumpbinCandidate) {
+                    $dumpbinPath = $dumpbinCandidate.FullName
+                  }
+                }
+              }
+            }
+          }
+
+          $dependencyDlls = @()
+          if ($dumpbinPath) {
+            Write-Host "`nRunning dumpbin to inspect $($binary.Name) dependencies..."
+            $dumpbinOutput = & $dumpbinPath /dependents $binary.FullName
+            $dependencyDlls = $dumpbinOutput | ForEach-Object {
+              if ($_ -match '^\s*([A-Za-z0-9_\-\+\.]+\.dll)\s*$') {
+                $matches[1].ToLower()
+              }
+            } | Where-Object { $_ -match '^lib' } | Sort-Object -Unique
+            if ($dependencyDlls.Count -gt 0) {
+              Write-Host "dumpbin reported the following runtime DLLs:"
+              $dependencyDlls | ForEach-Object { Write-Host "  $_" }
+            } else {
+              Write-Host "dumpbin did not list any lib*-style dependencies."
+            }
+          } else {
+            Write-Warning "dumpbin not available; falling back to static DLL list."
+          }
+
+          $runtimeDllTargets = $dependencyDlls | Where-Object { $_ -match '^lib(gfortran|quadmath|gcc|winpthread|stdc\+\+|ssp)' }
+          if (-not $runtimeDllTargets -or $runtimeDllTargets.Count -eq 0) {
+            $runtimeDllTargets = $defaultRuntimeDlls
+          }
+
+          Write-Host "`nRuntime DLL targets:"
+          $runtimeDllTargets | ForEach-Object { Write-Host "  $_" }
+
           # Create bundle directory
           $bundleDir = "win_bundle"
           if (Test-Path $bundleDir) { Remove-Item $bundleDir -Recurse -Force }
@@ -381,30 +441,25 @@ jobs:
           Write-Host "`n=== Available DLLs in $mingw ==="
           Get-ChildItem -Path $mingw -Filter "*.dll" | Select-Object -First 20 | ForEach-Object { Write-Host $_.Name }
 
-          # Copy all Fortran/GCC related DLLs we can find
-          $dllPatterns = @(
-            "libgfortran*.dll",
-            "libquadmath*.dll",
-            "libgcc*.dll",
-            "libwinpthread*.dll",
-            "libstdc++*.dll",
-            "libssp*.dll"
-          )
-
           Write-Host "`n=== Copying runtime DLLs ==="
           $copiedDlls = @()
-          foreach ($pattern in $dllPatterns) {
+          foreach ($dllName in $runtimeDllTargets) {
             $found = @()
             foreach ($root in $searchRoots) {
-              $found += Get-ChildItem -Path $root -Filter $pattern -ErrorAction SilentlyContinue
+              $candidate = Join-Path $root $dllName
+              if (Test-Path $candidate) {
+                $found += Get-Item $candidate
+              }
             }
             if (-not $found) {
               foreach ($root in $searchRoots) {
-                Write-Host "  Searching recursively under $root for $pattern..."
-                $found += Get-ChildItem -Path $root -Filter $pattern -Recurse -ErrorAction SilentlyContinue
+                Write-Host "  Searching recursively under $root for $dllName..."
+                $found += Get-ChildItem -Path $root -Filter $dllName -Recurse -ErrorAction SilentlyContinue
               }
             }
+
             if ($found) {
+              $found = $found | Sort-Object -Property FullName -Unique
               foreach ($dll in $found) {
                 $target = Join-Path $bundleDir $dll.Name
                 Write-Host "  Copying: $($dll.FullName)"
@@ -412,9 +467,10 @@ jobs:
                 if ($copiedDlls -notcontains $dll.Name) {
                   $copiedDlls += $dll.Name
                 }
+                break
               }
             } else {
-              Write-Host "  WARNING: No DLLs found matching $pattern"
+              Write-Host "  WARNING: Could not locate $dllName in provided search roots."
             }
           }
 
@@ -422,10 +478,10 @@ jobs:
           Write-Host "`n=== Bundled files ==="
           Get-ChildItem $bundleDir | ForEach-Object { Write-Host "  $($_.Name)" }
 
-          # Check if we got at least the binary
-          $bundledFiles = Get-ChildItem $bundleDir
-          if ($copiedDlls.Count -eq 0) {
-            Write-Error "`nERROR: No runtime DLLs were bundled. Please verify the MinGW installation path."
+          # Check if we got all targeted DLLs
+          $missingDlls = $runtimeDllTargets | Where-Object { $copiedDlls -notcontains $_ }
+          if ($missingDlls -and $missingDlls.Count -gt 0) {
+            Write-Error "`nERROR: Failed to bundle the following DLLs: $($missingDlls -join ', ')"
             exit 1
           }
 
